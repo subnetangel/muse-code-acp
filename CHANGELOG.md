@@ -14,6 +14,13 @@
 - Workflow `cancel` is advertised on Muse 1.4.8 after verifying it against a real run. Forking at an earlier turn still fails on 1.4.7 and 1.4.8 ([muse-code-sdk#97](https://github.com/meta-models/muse-code-sdk/issues/97)).
 - Release CI now runs the real-host suites on Muse 1.4.8-R6256.1 as well as the 1.1.1-R2514.1 baseline, and fails if a suite for a 1.4.x capability (goal controls, task controls, native session commands, exec reviewer) would skip there.
 
+## [0.10.0-kirocrew.1](https://github.com/subnetangel/muse-code-acp/compare/v0.10.0...v0.10.0-kirocrew.1) (2026-10-20)
+
+### Features
+
+- Kiro Crew fork pre-release. Seed the native approval policy at `session/new` (and `session/load`/`session/resume`) via `_meta` `{ "muse/approval": { policy } }`, so a host-fronting client can put `promptUnmatched` in force for the FIRST prompt without a separate `session/set_config_option` round trip. The returned `configOptions` reflect the seed (read-back), it persists to session preferences, and the `muse/approval` extension advertises `seedAtSessionNew: true`. An unknown or malformed policy is rejected with invalid params before the session is created. Additive and backend-agnostic.
+- Verify Muse Code 1.4.11-R6667.1 end to end: ACP handshake and advertised capabilities, stdio MCP server tool listing/calling, the approval seed + read-back, a real `session/request_permission` for an escalated shell command that a deny stops, cancel, `session/list` and `session/load`. Added to `VERIFIED_MUSE_HOSTS`. The SDK pin (`@muse-code/sdk@1.4.8`) treats the 1.4.11 schema-fingerprint divergence as advisory, not blocking (unchanged).
+
 ## [0.10.0](https://github.com/bex-co/muse-code-acp/compare/v0.9.1...v0.10.0) (2026-10-12)
 
 ### Features
