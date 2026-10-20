@@ -152,6 +152,60 @@ describe("ACP stdio wire contracts", () => {
     }
   }, 30_000);
 
+  it("seeds the native approval policy at session/new and reads it back", async () => {
+    const wire = await createWireFixture({
+      clientCapabilities: { _meta: { "muse/approval": 1 } },
+    });
+    try {
+      const { configOptions } = await wire.ctx.request(methods.agent.session.new, {
+        cwd: wire.workspace,
+        mcpServers: [],
+        _meta: { "muse/approval": { policy: "promptUnmatched" } },
+      });
+      const policy = (configOptions ?? []).find((o) => o.id === "nativeApprovalPolicy");
+      // Seed is in force for the FIRST prompt: no set_config_option round trip.
+      expect(policy?.currentValue).toBe("promptUnmatched");
+    } finally {
+      await wire.dispose();
+    }
+  }, 30_000);
+
+  it("rejects an unknown approval seed at session/new before creating a session", async () => {
+    const wire = await createWireFixture({
+      clientCapabilities: { _meta: { "muse/approval": 1 } },
+    });
+    try {
+      await expect(
+        wire.ctx.request(methods.agent.session.new, {
+          cwd: wire.workspace,
+          mcpServers: [],
+          _meta: { "muse/approval": { policy: "bogus" } },
+        }),
+      ).rejects.toMatchObject({ code: -32602 });
+    } finally {
+      await wire.dispose();
+    }
+  }, 30_000);
+
+  it("advertises the approval seed capability when the client negotiates muse/approval", async () => {
+    const wire = await createWireFixture({
+      clientCapabilities: { _meta: { "muse/approval": 1 } },
+    });
+    try {
+      const init = await wire.ctx.request(methods.agent.initialize, {
+        protocolVersion: PROTOCOL_VERSION,
+        clientCapabilities: { _meta: { "muse/approval": 1 } },
+      });
+      expect(
+        (init._meta as { "muse/approval"?: { seedAtSessionNew?: boolean } } | undefined)?.[
+          "muse/approval"
+        ]?.seedAtSessionNew,
+      ).toBe(true);
+    } finally {
+      await wire.dispose();
+    }
+  }, 30_000);
+
   it("exits with the reason when a message exceeds the SDK's size limit", async () => {
     const fakeMsp = join(fixturesDir, "fake-msp.cjs");
     chmodSync(fakeMsp, 0o755);

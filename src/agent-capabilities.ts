@@ -115,7 +115,7 @@ export function initializeResponse(
         ? { "muse/review": { version: 1 } }
         : {}),
       ...(backend === "sdk" && clientCapabilities._meta?.["muse/approval"] === 1
-        ? { "muse/approval": { version: 1 } }
+        ? { "muse/approval": { version: 1, seedAtSessionNew: true } }
         : {}),
       ...(backend === "sdk" && clientCapabilities._meta?.["muse/goal"] === 1
         ? {

@@ -8,6 +8,58 @@ export const NATIVE_POLICIES = [
   "denyUnmatched",
   "allowAll",
 ] as const;
+
+/**
+ * ACP `_meta` key a client may set on `session/new`, `session/load` and
+ * `session/resume` to SEED the native approval policy at creation, so the
+ * policy is in force for the FIRST prompt without a separate
+ * `session/set_config_option` round trip. The returned `configOptions` already
+ * reflect it (read-back). Shape: `{ "muse/approval": { policy: <NativePolicy> } }`.
+ * Any other policy spelling is rejected with invalid params; omitting the key
+ * leaves the default (`onRequest`) untouched. Additive and backend-agnostic:
+ * exec ignores native policy at spawn, but the read-back stays coherent.
+ */
+export const APPROVAL_SEED_META = "muse/approval";
+
+/**
+ * Read a seeded native approval policy out of a `session/new`-style `_meta`.
+ * Returns undefined when the client supplied none. Throws invalid params for a
+ * malformed shape or an unknown policy so a seed is never silently dropped.
+ */
+export function approvalSeedFromMeta(
+  meta: Record<string, unknown> | null | undefined,
+): (typeof NATIVE_POLICIES)[number] | undefined {
+  const raw = meta?.[APPROVAL_SEED_META];
+  if (raw === undefined || raw === null) return undefined;
+  if (typeof raw !== "object" || Array.isArray(raw))
+    throw RequestError.invalidParams(
+      undefined,
+      `${APPROVAL_SEED_META} seed must be an object { policy: <native approval policy> }`,
+    );
+  const policy = (raw as Record<string, unknown>).policy;
+  if (policy === undefined) return undefined;
+  if (typeof policy !== "string" || !(NATIVE_POLICIES as readonly string[]).includes(policy))
+    throw RequestError.invalidParams(
+      undefined,
+      `${APPROVAL_SEED_META}.policy must be one of ${NATIVE_POLICIES.join(", ")}`,
+    );
+  return policy as (typeof NATIVE_POLICIES)[number];
+}
+
+/**
+ * Apply a `_meta` approval-policy seed onto a session's initial safety, after
+ * validating it under the guard (root may not seed `allowAll`). The seed only
+ * sets `nativeApprovalPolicy`; every other safety field keeps its default.
+ */
+export function applyApprovalSeed(
+  current: SafetySettings | undefined,
+  meta: Record<string, unknown> | null | undefined,
+  guard: ModeGuardContext,
+): SafetySettings | undefined {
+  const policy = approvalSeedFromMeta(meta);
+  if (policy === undefined) return current;
+  return selectSafety(current, "nativeApprovalPolicy", policy, guard);
+}
 export interface SafetySettings {
   nativeApprovalPolicy: (typeof NATIVE_POLICIES)[number];
   sandbox: "enabled" | "disabled";

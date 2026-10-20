@@ -75,7 +75,7 @@ import {
   SessionConfig,
 } from "./config-options.js";
 import { FORK_METADATA } from "./session-fork.js";
-import { DEFAULT_SAFETY, assertSafetyGuard } from "./safety-settings.js";
+import { DEFAULT_SAFETY, applyApprovalSeed, assertSafetyGuard } from "./safety-settings.js";
 import {
   probeSdkHost,
   assertSdkSafetySupport,
@@ -482,7 +482,20 @@ export class MuseAcpAgent {
     return this.withSessionBinding(sessionId, async () => {
       await this.prepareProvider(sessionId, params._meta);
       const settings = readMuseSettings(this.providerEnv(sessionId), this.logger);
-      const config = this.defaultConfig(settings);
+      let config = this.defaultConfig(settings);
+      // Seam: a client may seed the native approval policy at session/new via
+      // _meta ("muse/approval":{policy}), so promptUnmatched is in force for the
+      // FIRST prompt. The returned configOptions reflect it (read-back), and we
+      // persist it so session/load and session/resume restore the same policy.
+      const seededSafety = applyApprovalSeed(config.safety, params._meta, this.safetyGuard());
+      if (seededSafety !== config.safety) {
+        config = { ...config, safety: seededSafety };
+        writeSessionPreferences(
+          sessionId,
+          { safety: seededSafety },
+          this.options.env ?? process.env,
+        );
+      }
       const modelDiscovery =
         this.backend === "sdk"
           ? this.modelDiscovery.peek(cwd, this.providerEnv(sessionId))
