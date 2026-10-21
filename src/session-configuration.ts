@@ -31,6 +31,7 @@ import {
   safetyConfigOptions,
   selectSafety,
 } from "./safety-settings.js";
+import { permissionProfileConfigOption } from "./permission-profile.js";
 import {
   writeSessionEffort,
   writeSessionMode,
@@ -263,6 +264,16 @@ export function buildSessionConfigOptions(
     ),
     ...(ctx.backend === "sdk"
       ? safetyConfigOptions(session.config.safety, ctx.safetyGuard(), hostVersion)
+      : []),
+    ...(ctx.backend === "sdk"
+      ? (() => {
+          // Read-back for the seeded native permission profile. currentValue is
+          // the id in force for the session (the seeded request; the host's
+          // committed permissionState.profileId is re-emitted on
+          // session/permissionProfileChanged once the host commits a change).
+          const option = permissionProfileConfigOption(session.config.permissionProfile);
+          return option ? [option] : [];
+        })()
       : []),
   ];
   if (ctx.backend !== "sdk" || ctx.clientCapabilities._meta?.[RECOMMENDATION_EXTENSION] !== 1)

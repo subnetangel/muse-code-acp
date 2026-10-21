@@ -42,6 +42,7 @@ type HostOptions = Pick<
   | "logger"
   | "checkHost"
   | "safety"
+  | "permissionProfile"
   | "providerId"
   | "profileId"
 > & {
@@ -54,6 +55,12 @@ type HostOptions = Pick<
   onProgress?: (facts: ProgressFacts) => Promise<void>;
   onTaskUpdate?: (notification: SessionNotification) => Promise<void>;
   onSessionState?: (state: SessionStateObservation) => Promise<void>;
+  /**
+   * The host committed a different permission profile after start
+   * (`session/permissionProfileChanged`, experimental). Carries the new
+   * committed `profileId` so the adapter re-emits the read-back config option.
+   */
+  onPermissionProfileChanged?: (profileId: string | null) => void | Promise<void>;
 };
 type InitializedHost = Awaited<ReturnType<ReturnType<typeof spawnMspConnection>["initialize"]>>;
 interface HostLease {
@@ -317,6 +324,7 @@ export class MuseSdkHost {
       options.providerId !== this.options.providerId ||
       options.profileId !== this.options.profileId ||
       options.readOnly !== this.options.readOnly ||
+      options.permissionProfile !== this.options.permissionProfile ||
       JSON.stringify(options.safety ?? DEFAULT_SAFETY) !==
         JSON.stringify(this.options.safety ?? DEFAULT_SAFETY)
     ) {
@@ -464,7 +472,12 @@ export class MuseSdkHost {
     const host = await handshake.initialize({
       clientInfo: { name: "muse_code_acp", version: packageJson.version },
       // `/feedback` needs it; an unknown capability is simply not granted.
-      capabilities: { requestedCapabilities: ["feedback"] },
+      // A seeded permission profile needs the experimental surface so the host
+      // populates `session.permissionState` for the require-profile read-back.
+      capabilities: {
+        requestedCapabilities: ["feedback"],
+        ...(options.permissionProfile != null ? { experimentalApi: true } : {}),
+      },
     });
     this.ensureOpen();
     preparing();
@@ -484,6 +497,18 @@ export class MuseSdkHost {
     host.connection.onNotification = (handler) =>
       subscribe((notification) => {
         if (notification.method === "recap/completed") this.settleRecap(notification.params);
+        // session/permissionProfileChanged is experimental and not folded by the
+        // pinned SDK, so observe it off the raw connection and surface the host's
+        // committed profileId for the config_option_update re-emit (contract item 4).
+        if (notification.method === "session/permissionProfileChanged") {
+          const params = notification.params as
+            { sessionId?: string; permissionState?: { profileId?: string | null } } | undefined;
+          if (
+            params?.sessionId === this.options.sessionId &&
+            this.options.onPermissionProfileChanged
+          )
+            void this.options.onPermissionProfileChanged(params.permissionState?.profileId ?? null);
+        }
         handler(notification);
       });
     const client = new MuseClient(host.connection, {
@@ -492,8 +517,16 @@ export class MuseSdkHost {
     });
     let session: Session;
     const requestedPolicy = options.safety?.nativeApprovalPolicy ?? "onRequest";
+    const profile = options.permissionProfile;
     try {
-      session = await client.resumeSession({ sessionId: options.sessionId, excludeItems: true });
+      session = await client.resumeSession({
+        sessionId: options.sessionId,
+        excludeItems: true,
+        // Restore the seeded profile as the resume launch pick. A pick the
+        // catalog cannot admit refuses the resume (-32030) before any durable
+        // byte; we never fall back to the host default.
+        ...(profile != null ? { permissionProfile: profile } : {}),
+      });
     } catch (error) {
       if (isLegacyAutoReviewRefusal(error))
         throw new Error(LEGACY_AUTO_REVIEW_MESSAGE, { cause: error });
@@ -505,6 +538,10 @@ export class MuseSdkHost {
         modelId: options.model,
         ...(options.providerId ? { providerId: options.providerId } : {}),
         approvalMode: requestedPolicy,
+        // Prove the committed profile equals the request and fail closed:
+        // `PermissionProfileNotApplied` (mismatch) or -32030 (unknown/unavailable)
+        // propagates rather than silently starting on the host default.
+        ...(profile != null ? { permissionProfile: profile, requirePermissionProfile: true } : {}),
       });
     }
     this.ensureOpen();

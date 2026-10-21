@@ -29,6 +29,7 @@ if (process.env.FAKE_MSP_PID) writeFileSync(process.env.FAKE_MSP_PID, String(pro
 let sessionId;
 let currentModelId = "muse-spark-1.2";
 let currentProviderId = "meta";
+let committedProfile;
 let turnId;
 let cursor = 0;
 const observationPages = [];
@@ -363,7 +364,10 @@ rl.on("line", async (line) => {
         } });
         break;
       }
-      reply({session: {sessionId: params.sessionId, workspaceRoot: process.cwd(), modelId: currentModelId, providerId: currentProviderId, activeTurnId: null}, pendingRequests: []});
+      reply({session: {sessionId: params.sessionId, workspaceRoot: process.cwd(), modelId: currentModelId, providerId: currentProviderId, activeTurnId: null,
+        ...(committedProfile != null
+          ? { permissionState: { profileId: committedProfile, reviewerAttached: true, reviewerAuthority: "human" } }
+          : {})}, pendingRequests: []});
       break;
     case "session/resume":
       if (mode === "autoReviewUnavailable") {
@@ -395,7 +399,30 @@ rl.on("line", async (line) => {
       }
       sessionId = params.sessionId;
       currentModelId = params.modelId; currentProviderId = params.providerId ?? "meta";
-      reply({ session: { sessionId, modelId: currentModelId, providerId: currentProviderId }, viewCursor: "" });
+      // Permission-profile admission (amendment 42624): an unknown/unavailable id
+      // refuses with commandRejected (-32030) before any durable byte; an admitted
+      // id is committed and echoed on permissionState so a require-profile client
+      // can prove the selection. The fake reserves ":reject-profile" for the
+      // unknown-id path and admits every other id.
+      if (params.permissionProfile === ":reject-profile") {
+        write({ id, error: { code: -32030,
+          message: `command ${id} rejected: no profile ${params.permissionProfile} in the host catalog`,
+          data: { kind: "commandRejected", reason: "permission_profile_unknown" },
+        } });
+        break;
+      }
+      if (params.permissionProfile === ":drift-profile") {
+        // Commits a DIFFERENT profile than requested: drives PermissionProfileNotApplied.
+        committedProfile = ":auto-review";
+      } else if (params.permissionProfile != null) {
+        committedProfile = params.permissionProfile;
+      }
+      reply({ session: {
+        sessionId, modelId: currentModelId, providerId: currentProviderId,
+        ...(committedProfile != null
+          ? { permissionState: { profileId: committedProfile, reviewerAttached: true, reviewerAuthority: "human" } }
+          : {}),
+      }, viewCursor: "" });
       break;
     case "session/setModel":
       currentModelId = params.model.modelId; currentProviderId = params.model.providerId ?? currentProviderId;
@@ -410,6 +437,14 @@ rl.on("line", async (line) => {
       });
       break;
     case "turn/start": {
+      if (process.env.FAKE_MSP_PROFILE_CHANGE) {
+        const next = process.env.FAKE_MSP_PROFILE_CHANGE;
+        committedProfile = next;
+        notify("session/permissionProfileChanged", {
+          sessionId,
+          permissionState: { profileId: next, reviewerAttached: true, reviewerAuthority: "human" },
+        });
+      }
       if (process.env.FAKE_MSP_OBSERVE === "1") {
         notify("session/modelChanged", { modelId: "host-model", providerId: "meta", source: "policy", sourceRange: { start: 0, end: 0 } });
         notify("session/approvalModeChanged", { mode: "denyUnmatched", source: "approvalReconfigure", clientName: "probe", commandId: "change", sourceRange: { start: 0, end: 0 } });

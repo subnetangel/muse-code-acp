@@ -22,6 +22,8 @@ type Preferences = {
   reasoningEffort?: string;
   modeId?: "default" | "readOnly" | "plan" | "bypassApprovals" | "rejectApprovals";
   safety?: SafetySettings;
+  /** The seeded native permission-profile id (host catalog row), restored on load/resume. */
+  permissionProfile?: string;
   providerBinding?: string;
   modelSelection?: { model: string; providerId?: string; profileId?: string | null };
 };
@@ -58,6 +60,8 @@ export function readSessionPreferences(
     (doc.providerBinding !== undefined &&
       (typeof doc.providerBinding !== "string" || !/^[a-f0-9]{64}$/.test(doc.providerBinding))) ||
     (doc.safety !== undefined && !validSafety(doc.safety)) ||
+    (doc.permissionProfile !== undefined &&
+      (typeof doc.permissionProfile !== "string" || doc.permissionProfile.length === 0)) ||
     (doc.reasoningEffort !== undefined && !isReasoningEffort(doc.reasoningEffort)) ||
     (doc.modeId !== undefined &&
       !["default", "readOnly", "plan", "bypassApprovals", "rejectApprovals"].includes(doc.modeId))
@@ -75,7 +79,13 @@ export function writeSessionPreferences(
   sessionId: string,
   change: Pick<
     Preferences,
-    "reasoningEffort" | "modeId" | "safety" | "providerBinding" | "modelSelection" | "userTitle"
+    | "reasoningEffort"
+    | "modeId"
+    | "safety"
+    | "permissionProfile"
+    | "providerBinding"
+    | "modelSelection"
+    | "userTitle"
   >,
   env: Record<string, string | undefined>,
 ): void {

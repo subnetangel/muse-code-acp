@@ -206,6 +206,193 @@ describe("ACP stdio wire contracts", () => {
     }
   }, 30_000);
 
+  it("seeds the native permission profile at session/new and reads the committed id back", async () => {
+    const wire = await createWireFixture({
+      clientCapabilities: { _meta: { "muse/approval": 1 } },
+    });
+    try {
+      const { configOptions } = await wire.ctx.request(methods.agent.session.new, {
+        cwd: wire.workspace,
+        mcpServers: [],
+        _meta: { "muse/approval": { policy: "promptUnmatched", profile: ":ask-me" } },
+      });
+      const profile = (configOptions ?? []).find((o) => o.id === "nativePermissionProfile");
+      // Seeded profile is read back on the SAME session/new response, beside the
+      // nativeApprovalPolicy option; currentValue is the id in force for the session.
+      expect(profile?.currentValue).toBe(":ask-me");
+      expect(profile?.category).toBe("safety");
+      const policy = (configOptions ?? []).find((o) => o.id === "nativeApprovalPolicy");
+      expect(policy?.currentValue).toBe("promptUnmatched");
+    } finally {
+      await wire.dispose();
+    }
+  }, 30_000);
+
+  it("omits the permission-profile read-back when no profile is seeded", async () => {
+    const wire = await createWireFixture({
+      clientCapabilities: { _meta: { "muse/approval": 1 } },
+    });
+    try {
+      const { configOptions } = await wire.ctx.request(methods.agent.session.new, {
+        cwd: wire.workspace,
+        mcpServers: [],
+        _meta: { "muse/approval": { policy: "promptUnmatched" } },
+      });
+      expect((configOptions ?? []).some((o) => o.id === "nativePermissionProfile")).toBe(false);
+    } finally {
+      await wire.dispose();
+    }
+  }, 30_000);
+
+  it("rejects a non-string permission-profile seed at session/new before creating a session", async () => {
+    const wire = await createWireFixture({
+      clientCapabilities: { _meta: { "muse/approval": 1 } },
+    });
+    try {
+      await expect(
+        wire.ctx.request(methods.agent.session.new, {
+          cwd: wire.workspace,
+          mcpServers: [],
+          _meta: { "muse/approval": { policy: "promptUnmatched", profile: "" } },
+        }),
+      ).rejects.toMatchObject({ code: -32602 });
+    } finally {
+      await wire.dispose();
+    }
+  }, 30_000);
+
+  it("advertises the permission-profile seed capability when the client negotiates muse/approval", async () => {
+    const wire = await createWireFixture({
+      clientCapabilities: { _meta: { "muse/approval": 1 } },
+    });
+    try {
+      const init = await wire.ctx.request(methods.agent.initialize, {
+        protocolVersion: PROTOCOL_VERSION,
+        clientCapabilities: { _meta: { "muse/approval": 1 } },
+      });
+      expect(
+        (init._meta as { "muse/approval"?: { seedProfileAtSessionNew?: boolean } } | undefined)?.[
+          "muse/approval"
+        ]?.seedProfileAtSessionNew,
+      ).toBe(true);
+    } finally {
+      await wire.dispose();
+    }
+  }, 30_000);
+
+  it("fails closed when the host rejects an unknown seeded profile at the first turn", async () => {
+    const wire = await createWireFixture({
+      clientCapabilities: { _meta: { "muse/approval": 1 } },
+    });
+    try {
+      const { sessionId } = await wire.ctx.request(methods.agent.session.new, {
+        cwd: wire.workspace,
+        mcpServers: [],
+        _meta: { "muse/approval": { profile: ":reject-profile" } },
+      });
+      // The profile is proven at the first host start; an unknown id (-32030)
+      // fails the turn rather than silently starting on the host default.
+      await expect(
+        wire.ctx.request(methods.agent.session.prompt, {
+          sessionId,
+          prompt: [{ type: "text", text: "go" }],
+        }),
+      ).rejects.toThrow(/:reject-profile|profile/i);
+      // No turn ever started on the host default.
+      expect(
+        wire
+          .getTranscript()
+          .mspRequests.some((r) => (r as { method?: string }).method === "turn/start"),
+      ).toBe(false);
+    } finally {
+      await wire.dispose();
+    }
+  }, 30_000);
+
+  it("fails closed when the host commits a different profile than requested", async () => {
+    const wire = await createWireFixture({
+      clientCapabilities: { _meta: { "muse/approval": 1 } },
+    });
+    try {
+      const { sessionId } = await wire.ctx.request(methods.agent.session.new, {
+        cwd: wire.workspace,
+        mcpServers: [],
+        _meta: { "muse/approval": { profile: ":drift-profile" } },
+      });
+      await expect(
+        wire.ctx.request(methods.agent.session.prompt, {
+          sessionId,
+          prompt: [{ type: "text", text: "go" }],
+        }),
+      ).rejects.toThrow(/:drift-profile|:auto-review|not applied|profile/i);
+      // PermissionProfileNotApplied: the drift commit (:auto-review) is proven
+      // against the request (:drift-profile) and refused; no turn is started.
+      expect(
+        wire
+          .getTranscript()
+          .mspRequests.some((r) => (r as { method?: string }).method === "turn/start"),
+      ).toBe(false);
+    } finally {
+      await wire.dispose();
+    }
+  }, 30_000);
+
+  it("commits the requested profile and proceeds when the host admits it", async () => {
+    const wire = await createWireFixture({
+      clientCapabilities: { _meta: { "muse/approval": 1 } },
+    });
+    try {
+      const { sessionId } = await wire.ctx.request(methods.agent.session.new, {
+        cwd: wire.workspace,
+        mcpServers: [],
+        _meta: { "muse/approval": { profile: ":ask-me" } },
+      });
+      await expect(
+        wire.ctx.request(methods.agent.session.prompt, {
+          sessionId,
+          prompt: [{ type: "text", text: "go" }],
+        }),
+      ).resolves.toEqual({ stopReason: "end_turn" });
+      const start = wire
+        .getTranscript()
+        .mspRequests.find((r) => (r as { method?: string }).method === "session/start") as {
+        params?: { permissionProfile?: string };
+      };
+      // The adapter forwarded the seeded profile verbatim to the host start.
+      expect(start?.params?.permissionProfile).toBe(":ask-me");
+    } finally {
+      await wire.dispose();
+    }
+  }, 30_000);
+
+  it("re-emits config_option_update when the host changes the committed profile mid-session", async () => {
+    const wire = await createWireFixture({
+      clientCapabilities: { _meta: { "muse/approval": 1 } },
+      env: { FAKE_MSP_PROFILE_CHANGE: ":unrestricted" },
+    });
+    try {
+      const { sessionId } = await wire.ctx.request(methods.agent.session.new, {
+        cwd: wire.workspace,
+        mcpServers: [],
+        _meta: { "muse/approval": { profile: ":ask-me" } },
+      });
+      await wire.ctx.request(methods.agent.session.prompt, {
+        sessionId,
+        prompt: [{ type: "text", text: "go" }],
+      });
+      // The host committed :unrestricted mid-turn; the adapter re-emits the
+      // read-back with the HOST's committed id, not the requested :ask-me.
+      const reemit = wire.updates
+        .map((u) => u.update)
+        .filter((u) => u.sessionUpdate === "config_option_update")
+        .map((u) => (u.configOptions ?? []).find((o) => o.id === "nativePermissionProfile"))
+        .filter((o): o is NonNullable<typeof o> => o != null);
+      expect(reemit.some((o) => o.currentValue === ":unrestricted")).toBe(true);
+    } finally {
+      await wire.dispose();
+    }
+  }, 30_000);
+
   it("exits with the reason when a message exceeds the SDK's size limit", async () => {
     const fakeMsp = join(fixturesDir, "fake-msp.cjs");
     chmodSync(fakeMsp, 0o755);

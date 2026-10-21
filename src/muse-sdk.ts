@@ -65,6 +65,8 @@ export interface MuseSdkOptions {
   reasoningEffort: string;
   readOnly: boolean;
   safety?: import("./safety-settings.js").SafetySettings;
+  /** Seeded native permission-profile id; forwarded to the host with requirePermissionProfile. */
+  permissionProfile?: string;
   automaticDecision?: "approve" | "reject";
   museBinary?: string;
   env: Record<string, string | undefined>;

@@ -14,6 +14,12 @@
 - Workflow `cancel` is advertised on Muse 1.4.8 after verifying it against a real run. Forking at an earlier turn still fails on 1.4.7 and 1.4.8 ([muse-code-sdk#97](https://github.com/meta-models/muse-code-sdk/issues/97)).
 - Release CI now runs the real-host suites on Muse 1.4.8-R6256.1 as well as the 1.1.1-R2514.1 baseline, and fails if a suite for a 1.4.x capability (goal controls, task controls, native session commands, exec reviewer) would skip there.
 
+## [0.10.0-kirocrew.2](https://github.com/subnetangel/muse-code-acp/compare/v0.10.0-kirocrew.1...v0.10.0-kirocrew.2) (2026-10-21)
+
+### Features
+
+- Seed the native **permission profile** at `session/new` via the existing `muse/approval` `_meta` extension (`{ policy?, profile? }`). `profile` is additive: a client that sends only `policy` keeps today's behaviour. The selected profile is forwarded to the host with `requirePermissionProfile: true`, so the adapter proves the committed selection and **fails closed** — an unknown/unavailable id (`-32030`) or a drift from the request (`PermissionProfileNotApplied`) refuses the turn and never falls back to the host default. The committed profile is read back as a second `configOptions` entry (`nativePermissionProfile`) on `session/new`/`session/load` and re-emitted as `config_option_update` on `session/permissionProfileChanged`. `initialize` advertises `seedProfileAtSessionNew: true` beside `seedAtSessionNew: true`. This lets a host-fronting client select the host **Ask me** profile (`:ask-me`, reviewer authority `human`) so a session-mounted MCP tool call draws a real `session/request_permission` — which the host default `:auto-review` profile clears without one.
+
 ## [0.10.0-kirocrew.1](https://github.com/subnetangel/muse-code-acp/compare/v0.10.0...v0.10.0-kirocrew.1) (2026-10-20)
 
 ### Features

@@ -3,6 +3,7 @@ import {
   type ClientCapabilities,
   type PromptRequest,
   type PromptResponse,
+  type SessionConfigOption,
 } from "@agentclientprotocol/sdk";
 import type { AcpClient, MuseAgentOptions, SessionState } from "./agent-types.js";
 import { resolvedModel } from "./config-options.js";
@@ -47,6 +48,9 @@ export interface SdkTurnContext {
   progressFor(sessionId: string, session: SessionState): SessionProgress;
   publishAuth(sessionId: string, session: SessionState): Promise<void>;
   inspectGoal(sessionId: string, session: SessionState): Promise<string>;
+  sessionConfigOptions(
+    session: Pick<SessionState, "config" | "modeId" | "modelDiscovery">,
+  ): SessionConfigOption[];
 }
 
 export interface SdkTurnRequest {
@@ -146,6 +150,7 @@ export async function runSdkTurn(
       profileId,
       readOnly,
       safety: session.config.safety,
+      permissionProfile: session.config.permissionProfile,
       museBinary: ctx.options.museBinary,
       env: overlay.env,
       logger: ctx.logger,
@@ -173,6 +178,26 @@ export async function runSdkTurn(
       onProgress: async (facts) => {
         if (session.sdkHost?.owner === owner)
           await ctx.progressFor(sessionId, session).observe(facts);
+      },
+      onPermissionProfileChanged: async (profileId) => {
+        // The host committed a new profile mid-session: reflect the HOST's
+        // committed id (never a requested echo) into the read-back and re-emit.
+        if (
+          ctx.isDisposed ||
+          ctx.sessions.get(sessionId) !== session ||
+          session.sdkHost?.owner !== owner ||
+          profileId == null ||
+          session.config.permissionProfile === profileId
+        )
+          return;
+        session.config = { ...session.config, permissionProfile: profileId };
+        await ctx.client.sessionUpdate({
+          sessionId,
+          update: {
+            sessionUpdate: "config_option_update",
+            configOptions: ctx.sessionConfigOptions(session),
+          },
+        });
       },
       initialGoal: session.goal,
       ...(ctx.clientCapabilities._meta?.[SESSION_STATE_EXTENSION] === 1
@@ -209,6 +234,7 @@ export async function runSdkTurn(
     reasoningEffort: session.config.reasoningEffort,
     readOnly,
     safety: session.config.safety,
+    permissionProfile: session.config.permissionProfile,
     automaticDecision: readOnly
       ? undefined
       : session.modeId === "bypassApprovals"

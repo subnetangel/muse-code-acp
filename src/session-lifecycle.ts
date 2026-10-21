@@ -159,6 +159,7 @@ export async function loadSessionState(
     config.reasoningEffort = preferences.reasoningEffort ?? config.reasoningEffort;
     savedMode = preferences.modeId ?? "default";
     config.safety = preferences.safety;
+    config.permissionProfile = preferences.permissionProfile;
     ctx.validateSafety(config, savedMode);
   }
   const modelDiscovery =
@@ -268,6 +269,7 @@ export async function forkSessionState(
       ...(source?.config ?? ctx.defaultConfig(readMuseSettings(env, ctx.logger))),
     };
     config.safety = undefined;
+    config.permissionProfile = undefined;
     config.model = saved.modelId ?? config.model;
     config.providerId = saved.providerId ?? config.providerId;
     config.reasoningEffort =
@@ -429,6 +431,7 @@ export async function resumeSessionState(
     config.reasoningEffort = preferences.reasoningEffort ?? config.reasoningEffort;
     savedMode = preferences.modeId ?? "default";
     config.safety = preferences.safety;
+    config.permissionProfile = preferences.permissionProfile;
     ctx.validateSafety(config, savedMode);
   }
   const modelDiscovery =

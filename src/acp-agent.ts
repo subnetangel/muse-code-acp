@@ -76,6 +76,7 @@ import {
 } from "./config-options.js";
 import { FORK_METADATA } from "./session-fork.js";
 import { DEFAULT_SAFETY, applyApprovalSeed, assertSafetyGuard } from "./safety-settings.js";
+import { profileSeedFromMeta } from "./permission-profile.js";
 import {
   probeSdkHost,
   assertSdkSafetySupport,
@@ -493,6 +494,19 @@ export class MuseAcpAgent {
         writeSessionPreferences(
           sessionId,
           { safety: seededSafety },
+          this.options.env ?? process.env,
+        );
+      }
+      // Seam: a client may also seed the native permission PROFILE on the same
+      // _meta extension (muse/approval.profile). The profile is proven at the
+      // first host start (requirePermissionProfile) and fails closed; here we
+      // only record the selection and persist it for session/load and resume.
+      const seededProfile = profileSeedFromMeta(params._meta);
+      if (seededProfile !== undefined && seededProfile !== config.permissionProfile) {
+        config = { ...config, permissionProfile: seededProfile };
+        writeSessionPreferences(
+          sessionId,
+          { permissionProfile: seededProfile },
           this.options.env ?? process.env,
         );
       }

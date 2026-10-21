@@ -40,6 +40,8 @@ const DEFAULT_EFFORT = "high";
 
 export interface SessionConfig {
   safety?: import("./safety-settings.js").SafetySettings;
+  /** Seeded native permission-profile id (host catalog row); proven at host start. */
+  permissionProfile?: string;
   model: string;
   providerId?: string;
   profileId?: string | null;
